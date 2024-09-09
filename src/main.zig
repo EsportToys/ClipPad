@@ -76,6 +76,11 @@ const main_window = struct {
             .key = 'W',
             .cmd = 'W',
         },
+        .{
+            .fVirt = 0x01,
+            .key = 0x7A,
+            .cmd = 0xF11,
+        },
     };
     fn init() !bool {
         var cli = std.process.argsWithAllocator(default_heap.allocator()) catch return false;
@@ -137,7 +142,7 @@ pub fn main() void {
     });
 
     if (atom == 0) return;
-    const style: i32 = WS_VISIBLE | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+    const style: i32 = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
     const hwnd = CreateWindowExA(
         0,
         @ptrFromInt(@as(usize, @intCast(atom))),
@@ -255,7 +260,7 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
             const beige = main_window.background;
             if (GetStockObject(18)) |b| { // DC_BRUSH
                 const text_color = if (0x0133 == uMsg) main_window.color else GetSysColor(17); // COLOR_GRAYTEXT
-                _ = SetTextColor(@ptrFromInt(wParam), text_color); 
+                _ = SetTextColor(@ptrFromInt(wParam), text_color);
                 _ = SetBkColor(@ptrFromInt(wParam), beige);
                 _ = SetDCBrushColor(@ptrFromInt(wParam), beige);
                 return @bitCast(@intFromPtr(b));
@@ -318,15 +323,15 @@ fn onAccelerator(wParam: usize) void {
             _ = SendMessageA(main_window.edit, 0x0400 + 225, main_window.zoom, 100); // EM_SETZOOM = 0x0400+225
         },
         'K', 't' => {
-            var cols: [16]u32 = if (key=='K') .{default_beige} ** 16 else .{0} ** 16;
+            var cols: [16]u32 = if (key == 'K') .{default_beige} ** 16 else .{0} ** 16;
             var inf: comdlg.CHOOSECOLORA = .{
                 .hwndOwner = main_window.main,
-                .rgbResult = if (key=='K') main_window.background else main_window.color,
+                .rgbResult = if (key == 'K') main_window.background else main_window.color,
                 .lpCustColors = &cols,
                 .Flags = 0x103,
             };
             if (0 == comdlg.ChooseColorA(&inf)) return;
-            if (key=='K') {
+            if (key == 'K') {
                 main_window.background = inf.rgbResult;
             } else {
                 main_window.color = inf.rgbResult;
@@ -387,6 +392,9 @@ fn onAccelerator(wParam: usize) void {
         'W' => {
             _ = SendMessageA(main_window.main, 0x0010, 0, 0);
         },
+        0xF11 => {
+            toggleFullscreen(main_window.main);
+        },
         else => {},
     }
 }
@@ -426,7 +434,27 @@ fn fork(path: ?[:0]const u8) void {
     );
 }
 
+fn toggleFullscreen(hwnd: *const anyopaque) void {
+    // from https://devblogs.microsoft.com/oldnewthing/20100412-00/?p=14353
+    const static = struct {
+        var last: WINDOWPLACEMENT = .{};
+    };
+    const style: u32 = @bitCast(GetWindowLongA(hwnd, -16)); // GWL_STYLE
+    if (0 != style & WS_OVERLAPPEDWINDOW) {
+        var inf: MONITORINFO = .{};
+        if (0 != GetWindowPlacement(hwnd, &static.last) and 0 != GetMonitorInfoA(MonitorFromWindow(hwnd, 2), &inf)) {
+            _ = SetWindowLongA(hwnd, -16, @bitCast(style & ~@as(u32, WS_OVERLAPPEDWINDOW)));
+            _ = SetWindowPos(hwnd, null, inf.rcMonitor.left, inf.rcMonitor.top, inf.rcMonitor.right - inf.rcMonitor.left, inf.rcMonitor.bottom - inf.rcMonitor.top, 0x0220);
+        }
+    } else {
+        _ = SetWindowLongA(hwnd, -16, @bitCast(style | @as(u32, WS_OVERLAPPEDWINDOW)));
+        _ = SetWindowPlacement(hwnd, &static.last);
+        _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, 0x0227);
+    }
+}
+
 const CW_USEDEFAULT: i32 = @bitCast(@as(u32, 0x80000000));
+const WS_OVERLAPPEDWINDOW = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 const WS_VISIBLE = 0x10000000;
 const WS_SYSMENU = 0x00080000;
 const WS_CAPTION = 0x00C00000;
@@ -499,7 +527,30 @@ extern "user32" fn SetFocus(*const anyopaque) callconv(WINAPI) *const anyopaque;
 extern "user32" fn GetKeyState(i32) callconv(WINAPI) u16;
 extern "user32" fn GetWindowLongPtrA(*const anyopaque, i32) callconv(WINAPI) isize;
 extern "user32" fn SetWindowLongPtrA(*const anyopaque, i32, isize) callconv(WINAPI) isize;
+extern "user32" fn GetWindowLongA(*const anyopaque, i32) callconv(WINAPI) i32;
+extern "user32" fn SetWindowLongA(*const anyopaque, i32, i32) callconv(WINAPI) i32;
 extern "user32" fn CallWindowProcA(WNDPROC, *anyopaque, u32, usize, isize) callconv(WINAPI) isize;
+extern "user32" fn GetWindowPlacement(*const anyopaque, *WINDOWPLACEMENT) callconv(WINAPI) isize;
+extern "user32" fn SetWindowPlacement(*const anyopaque, *const WINDOWPLACEMENT) callconv(WINAPI) isize;
+const WINDOWPLACEMENT = extern struct {
+    length: u32 = @sizeOf(@This()),
+    flags: u32 = 0,
+    showCmd: u32 = 0,
+    ptMinPosition: win.POINT = @bitCast(@as([2]i32, .{0} ** 2)),
+    ptMaxPosition: win.POINT = @bitCast(@as([2]i32, .{0} ** 2)),
+    rcNormalPosition: win.RECT = @bitCast(@as([4]i32, .{0} ** 4)),
+    rcDevice: win.RECT = @bitCast(@as([4]i32, .{0} ** 4)),
+};
+
+const HMONITOR = *opaque {};
+const MONITORINFO = extern struct {
+    cbSize: u32 = @sizeOf(@This()),
+    rcMonitor: win.RECT = @bitCast(@as([4]i32, .{0} ** 4)),
+    rcWork: win.RECT = @bitCast(@as([4]i32, .{0} ** 4)),
+    dwFlags: u32 = 0,
+};
+extern "user32" fn MonitorFromWindow(*const anyopaque, u32) callconv(WINAPI) HMONITOR;
+extern "user32" fn GetMonitorInfoA(HMONITOR, *MONITORINFO) callconv(WINAPI) i32;
 
 const HACCEL = *opaque {};
 const ACCEL = extern struct {
