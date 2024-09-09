@@ -8,7 +8,8 @@ const fonts = @import("fonts.zig");
 const default_beige = 0xC9D1D9; // 0xeff6f6 is hackernews beige
 const main_window = struct {
     var zoom: u32 = 100;
-    var color: u32 = default_beige;
+    var color: u32 = 0;
+    var background: u32 = default_beige;
     var main: *anyopaque = undefined;
     var edit: *anyopaque = undefined;
     var font: fonts.HFONT = undefined;
@@ -29,6 +30,11 @@ const main_window = struct {
             .fVirt = 0x09,
             .key = 0xBD,
             .cmd = '-',
+        },
+        .{
+            .fVirt = 0x0D,
+            .key = 'T',
+            .cmd = 't',
         },
         .{
             .fVirt = 0x09,
@@ -246,9 +252,10 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
             if (wParam >> 16 == 1) onAccelerator(wParam);
         },
         0x0133, 0x0138 => { // WM_CTLCOLOREDIT, WM_CTRLCOLORSTATIC
-            const beige = main_window.color;
+            const beige = main_window.background;
             if (GetStockObject(18)) |b| { // DC_BRUSH
-                if (0x0138 == uMsg) _ = SetTextColor(@ptrFromInt(wParam), GetSysColor(17)); // COLOR_GRAYTEXT
+                const text_color = if (0x0133 == uMsg) main_window.color else GetSysColor(17); // COLOR_GRAYTEXT
+                _ = SetTextColor(@ptrFromInt(wParam), text_color); 
                 _ = SetBkColor(@ptrFromInt(wParam), beige);
                 _ = SetDCBrushColor(@ptrFromInt(wParam), beige);
                 return @bitCast(@intFromPtr(b));
@@ -310,16 +317,20 @@ fn onAccelerator(wParam: usize) void {
             main_window.zoom = if (key == '+') @min(500, main_window.zoom + 10) else @max(10, main_window.zoom - 10);
             _ = SendMessageA(main_window.edit, 0x0400 + 225, main_window.zoom, 100); // EM_SETZOOM = 0x0400+225
         },
-        'K' => {
-            var cols: [16]u32 = .{default_beige} ** 16;
+        'K', 't' => {
+            var cols: [16]u32 = if (key=='K') .{default_beige} ** 16 else .{0} ** 16;
             var inf: comdlg.CHOOSECOLORA = .{
                 .hwndOwner = main_window.main,
-                .rgbResult = main_window.color,
+                .rgbResult = if (key=='K') main_window.background else main_window.color,
                 .lpCustColors = &cols,
                 .Flags = 0x103,
             };
             if (0 == comdlg.ChooseColorA(&inf)) return;
-            main_window.color = inf.rgbResult;
+            if (key=='K') {
+                main_window.background = inf.rgbResult;
+            } else {
+                main_window.color = inf.rgbResult;
+            }
         },
         'L' => {
             _ = SendMessageA(main_window.edit, 0x00CF, @intFromBool(!locked), 0); // EM_SETREADONLY = 0xF0CF
