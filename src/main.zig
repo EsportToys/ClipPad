@@ -171,6 +171,19 @@ fn editProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(
                 return 0;
             }
         },
+        0x020A, 0x020E => { // WM_MOUSEWHEEL, WM_MOUSEHWHEEL
+            const Arg = packed struct(usize) {
+                lo: u16,
+                delta: i16,
+                unused: if (@sizeOf(usize) == 8) u32 else u0,
+                var accu: i16 = 0;
+            };
+            var arg: Arg = @bitCast(wParam);
+            const send = 120 * @divTrunc(arg.delta + Arg.accu, 120);
+            Arg.accu = arg.delta + Arg.accu - send;
+            arg.delta = send;
+            return CallWindowProcA(main_window.default_proc, hwnd, uMsg, @bitCast(arg), lParam);
+        },
         else => {},
     }
     return CallWindowProcA(main_window.default_proc, hwnd, uMsg, wParam, lParam);
