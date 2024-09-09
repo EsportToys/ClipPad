@@ -2,11 +2,13 @@ const std = @import("std");
 const win = std.os.windows;
 const WINAPI = win.WINAPI;
 
-const filedlg = @import("filedlg.zig");
+const comdlg = @import("comdlg.zig");
 const fonts = @import("fonts.zig");
 
+const default_beige = 0xC9D1D9; // 0xeff6f6 is hackernews beige
 const main_window = struct {
     var zoom: u32 = 100;
+    var color: u32 = default_beige;
     var main: *anyopaque = undefined;
     var edit: *anyopaque = undefined;
     var font: fonts.HFONT = undefined;
@@ -60,6 +62,11 @@ const main_window = struct {
         },
         .{
             .fVirt = 0x09,
+            .key = 'K',
+            .cmd = 'K',
+        },
+        .{
+            .fVirt = 0x09,
             .key = 'W',
             .cmd = 'W',
         },
@@ -89,7 +96,7 @@ const main_window = struct {
         const len = win.GetFileSizeEx(file_handle) catch return;
         const content = default_heap.allocator().allocSentinel(u8, len, 0) catch return;
         defer default_heap.allocator().free(content);
-        _ = win.ReadFile(file_handle, content, 0) catch return;    
+        _ = win.ReadFile(file_handle, content, 0) catch return;
         _ = SetWindowTextA(edit, content);
     }
 
@@ -100,11 +107,13 @@ const main_window = struct {
         if (len < 0) return;
         const content = default_heap.allocator().allocSentinel(u8, @intCast(len), 0) catch return;
         defer default_heap.allocator().free(content);
-        _ = GetWindowTextA(edit, content, @intCast(content.len + 1));            
+        _ = GetWindowTextA(edit, content, @intCast(content.len + 1));
         var index: usize = 0;
         while (index < content.len) {
-            index += win.WriteFile(file_handle, content[index..], null) catch {break;};
-        }               
+            index += win.WriteFile(file_handle, content[index..], null) catch {
+                break;
+            };
+        }
     }
 };
 
@@ -237,7 +246,7 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
             if (wParam >> 16 == 1) onAccelerator(wParam);
         },
         0x0133, 0x0138 => { // WM_CTLCOLOREDIT, WM_CTRLCOLORSTATIC
-            const beige: u32 = 0xC9D1D9; // 0xeff6f6 is hackernews beige
+            const beige = main_window.color;
             if (GetStockObject(18)) |b| { // DC_BRUSH
                 if (0x0138 == uMsg) _ = SetTextColor(@ptrFromInt(wParam), GetSysColor(17)); // COLOR_GRAYTEXT
                 _ = SetBkColor(@ptrFromInt(wParam), beige);
@@ -268,7 +277,7 @@ fn updateTitle(comptime suffix: []const u8, locked: bool) void {
     // _ = SetWindowTextA(main_window.main, buf[start..].ptr);
     var buf: [256]u8 = (suffix ++ .{0} ** (256 - suffix.len)).*;
     if (locked) buf[suffix.len..][0.." (locked)".len].* = " (locked)".*;
-    defer _ = SetWindowTextA(main_window.main, buf[0..255:0]);
+    defer _ = SetWindowTextA(main_window.main, buf[0..255 :0]);
     if (0 == main_window.path[0]) return;
     const pbuf = &main_window.path;
     const basename = std.fs.path.basename(pbuf);
@@ -295,11 +304,22 @@ fn onAccelerator(wParam: usize) void {
     switch (key) {
         '0' => {
             main_window.zoom = 100;
-            _ = SendMessageA(main_window.edit, 0x0400+225, 0, 0); // EM_SETZOOM = 0x0400+225
+            _ = SendMessageA(main_window.edit, 0x0400 + 225, 0, 0); // EM_SETZOOM = 0x0400+225
         },
         '+', '-' => {
             main_window.zoom = if (key == '+') @min(500, main_window.zoom + 10) else @max(10, main_window.zoom - 10);
-            _ = SendMessageA(main_window.edit, 0x0400+225, main_window.zoom, 100); // EM_SETZOOM = 0x0400+225
+            _ = SendMessageA(main_window.edit, 0x0400 + 225, main_window.zoom, 100); // EM_SETZOOM = 0x0400+225
+        },
+        'K' => {
+            var cols: [16]u32 = .{default_beige} ** 16;
+            var inf: comdlg.CHOOSECOLORA = .{
+                .hwndOwner = main_window.main,
+                .rgbResult = main_window.color,
+                .lpCustColors = &cols,
+                .Flags = 0x103,
+            };
+            if (0 == comdlg.ChooseColorA(&inf)) return;
+            main_window.color = inf.rgbResult;
         },
         'L' => {
             _ = SendMessageA(main_window.edit, 0x00CF, @intFromBool(!locked), 0); // EM_SETREADONLY = 0xF0CF
@@ -310,13 +330,13 @@ fn onAccelerator(wParam: usize) void {
         },
         'O' => {
             if (locked and 6 != MessageBoxA(main_window.main, "Are you sure you want to load a different note?", "Confirm load", 0x104)) return;
-            var buf: filedlg.OPENFILENAMEA = .{
+            var buf: comdlg.OPENFILENAMEA = .{
                 .hwndOwner = main_window.main,
                 .lpstrFile = (&main_window.path).ptr,
                 .nMaxFile = (&main_window.path).len + 1,
                 .Flags = 0x00001004, // OFN_FILEMUSTEXIST | OFN_READONLY
             };
-            if (0 == filedlg.GetOpenFileNameA(&buf)) return;
+            if (0 == comdlg.GetOpenFileNameA(&buf)) return;
             main_window.load();
             updateTitle("ClipPad", locked);
         },
@@ -326,26 +346,26 @@ fn onAccelerator(wParam: usize) void {
             main_window.load();
         },
         'S' => {
-            var inf: filedlg.OPENFILENAMEA = .{
+            var inf: comdlg.OPENFILENAMEA = .{
                 .hwndOwner = main_window.main,
                 .lpstrFilter = "All Files\x00*.*\x00\x00".ptr,
                 .lpstrFile = (&main_window.path).ptr,
                 .nMaxFile = (&main_window.path).len + 1,
                 .Flags = 2, // OFN_OVERWRITEPROMPT
             };
-            if (0 == filedlg.GetSaveFileNameA(&inf)) return;
+            if (0 == comdlg.GetSaveFileNameA(&inf)) return;
             main_window.save();
             updateTitle("ClipPad", locked);
         },
         'T' => {
             var buf: fonts.LOGFONTA = undefined;
             _ = GetObjectA(main_window.font, @sizeOf(fonts.LOGFONTA), &buf);
-            var choose: fonts.CHOOSEFONTA = .{
+            var choose: comdlg.CHOOSEFONTA = .{
                 .hwndOwner = main_window.main,
                 .lpLogFont = &buf,
                 .Flags = 0x0001040, // CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT
             };
-            if (0 == fonts.ChooseFontA(&choose)) return;
+            if (0 == comdlg.ChooseFontA(&choose)) return;
             const newFont = fonts.CreateFontIndirectA(&buf) orelse return;
             _ = DeleteObject(main_window.font);
             main_window.font = newFont;
