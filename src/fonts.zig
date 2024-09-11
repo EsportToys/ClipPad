@@ -18,8 +18,8 @@ pub const LOGFONTA = extern struct {
     lfQuality: u8,
     lfPitchAndFamily: u8,
     lfFaceName: [32]u8,
-    pub fn setHeightByPt(this: *@This(), pt: u32, dpi: u32, neg: bool) void {
-        this.lfHeight = @intFromFloat(@round(@as(f64, @floatFromInt(pt * dpi)) / 72.0));
+    pub fn setHeightByPt(this: *@This(), pt_tenths: u32, dpi: u32, neg: bool) void {
+        this.lfHeight = @intFromFloat(@round(@as(f64, @floatFromInt(pt_tenths * dpi)) / 720)); // in 1/10th points
         if (neg) this.lfHeight *= -1;
     }
 };
@@ -27,9 +27,9 @@ pub const LOGFONTA = extern struct {
 pub extern "gdi32" fn CreateFontA(i32, i32, i32, i32, i32, u32, u32, u32, u32, u32, u32, u32, u32, [*:0]const u8) callconv(WINAPI) ?HFONT;
 pub extern "gdi32" fn CreateFontIndirectA(*const LOGFONTA) callconv(WINAPI) ?HFONT;
 
-pub const default_pointsize: i32 = 11;
+pub const default_pointsize: i32 = 110; // in 1/10th points
 pub const default_consolas: LOGFONTA = .{
-    .lfHeight = -@as(i32, @intFromFloat(@round(11.0 * 96.0 / 72.0))), // TODO: dpi-awareness
+    .lfHeight = -@as(i32, @intFromFloat(@round(110 * 96.0 / 72.0))), // TODO: dpi-awareness
     .lfWidth = 0,
     .lfEscapement = 0,
     .lfOrientation = 0,

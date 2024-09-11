@@ -17,7 +17,7 @@ const main_window = struct {
     var placement: WINDOWPLACEMENT = .{};
     var fullscreen = false;
     var path: [32767:0]u8 = .{0} ** 32767;
-    var last_font: fonts.LOGFONTA = fonts.default_consolas;
+    var last_font = fonts.default_consolas;
     var last_size = fonts.default_pointsize;
     var accel = [_]ACCEL{
         .{
