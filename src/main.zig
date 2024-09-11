@@ -274,8 +274,8 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
             }
         },
         0x02E0 => { // WM_DPICHANGED
-            // main_window.last_font.setHeightByPt(@bitCast(main_window.last_size), GetDpiForWindow(hwnd), true);
-            // _ = changeFont(main_window.last_font);
+            main_window.last_font.setHeightByPt(@bitCast(main_window.last_size), GetDpiForWindow(hwnd), true);
+            _ = changeFont(main_window.last_font);
         },
         else => {},
     }
