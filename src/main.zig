@@ -14,7 +14,11 @@ const main_window = struct {
     var edit: *anyopaque = undefined;
     var font: fonts.HFONT = undefined;
     var default_proc: WNDPROC = undefined;
+    var placement: WINDOWPLACEMENT = .{};
+    var fullscreen = false;
     var path: [32767:0]u8 = .{0} ** 32767;
+    var last_font: fonts.LOGFONTA = fonts.default_consolas;
+    var last_size = fonts.default_pointsize;
     var accel = [_]ACCEL{
         .{
             .fVirt = 0x09,
@@ -230,7 +234,8 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
                 null,
             ) orelse return -1;
             const proc = SetWindowLongPtrA(hEdit, -4, @bitCast(@intFromPtr(&editProc)));
-            const hFont = fonts.CreateFontIndirectA(&fonts.default_consolas) orelse return -1;
+            main_window.last_font.setHeightByPt(@bitCast(main_window.last_size), GetDpiForWindow(hwnd), true);
+            const hFont = fonts.CreateFontIndirectA(&main_window.last_font) orelse return -1;
             // const hFont: fonts.HFONT = @ptrCast(GetStockObject(16)); // SYSTEM_FIXED_FONT = 16
             main_window.font = hFont;
             main_window.edit = hEdit;
@@ -242,8 +247,10 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
             _ = SetFocus(hEdit);
         },
         0x0005 => { // WM_SIZE
+            const dpi = GetDpiForWindow(hwnd);
+            const margins = if (main_window.fullscreen) .{ GetSystemMetricsForDpi(2, dpi), GetSystemMetricsForDpi(3, dpi) } else .{ 0, 0 };
             const client: [4]u16 = @bitCast(lParam);
-            _ = SetWindowPos(main_window.edit, null, 0, 0, client[0], client[1], 0);
+            _ = SetWindowPos(main_window.edit, null, 0, 0, client[0] + margins[0], client[1] + margins[1], 0);
         },
         0x0007 => { // WM_SETFOCUS
             _ = SetFocus(main_window.edit);
@@ -265,6 +272,10 @@ fn wndProc(hwnd: *anyopaque, uMsg: u32, wParam: usize, lParam: isize) callconv(W
                 _ = SetDCBrushColor(@ptrFromInt(wParam), beige);
                 return @bitCast(@intFromPtr(b));
             }
+        },
+        0x02E0 => { // WM_DPICHANGED
+            // main_window.last_font.setHeightByPt(@bitCast(main_window.last_size), GetDpiForWindow(hwnd), true);
+            // _ = changeFont(main_window.last_font);
         },
         else => {},
     }
@@ -382,12 +393,7 @@ fn onAccelerator(wParam: usize) void {
                 .Flags = 0x0001040, // CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT
             };
             if (0 == comdlg.ChooseFontA(&choose)) return;
-            const newFont = fonts.CreateFontIndirectA(&buf) orelse return;
-            _ = DeleteObject(main_window.font);
-            main_window.font = newFont;
-            const brush: usize = @intFromPtr(newFont);
-            _ = SendMessageA(main_window.edit, 0x0030, @bitCast(brush), 1);
-            _ = SendMessageA(main_window.edit, 0x00D3, 0xffff, 0xffffffff); // EM_SETMARGINS = 0x00D3
+            if (changeFont(buf)) main_window.last_size = choose.iPointSize;
         },
         'W' => {
             _ = SendMessageA(main_window.main, 0x0010, 0, 0);
@@ -397,6 +403,18 @@ fn onAccelerator(wParam: usize) void {
         },
         else => {},
     }
+}
+
+fn changeFont(buf: fonts.LOGFONTA) bool {
+    const oldFont = main_window.font;
+    const newFont = fonts.CreateFontIndirectA(&buf) orelse return false;
+    defer _ = DeleteObject(oldFont);
+    main_window.font = newFont;
+    main_window.last_font = buf;
+    const brush: usize = @intFromPtr(newFont);
+    _ = SendMessageA(main_window.edit, 0x0030, @bitCast(brush), 1);
+    _ = SendMessageA(main_window.edit, 0x00D3, 0xffff, 0xffffffff); // EM_SETMARGINS = 0x00D3
+    return true;
 }
 
 fn fork(path: ?[:0]const u8) void {
@@ -436,19 +454,17 @@ fn fork(path: ?[:0]const u8) void {
 
 fn toggleFullscreen(hwnd: *const anyopaque) void {
     // from https://devblogs.microsoft.com/oldnewthing/20100412-00/?p=14353
-    const static = struct {
-        var last: WINDOWPLACEMENT = .{};
-    };
     const style: u32 = @bitCast(GetWindowLongA(hwnd, -16)); // GWL_STYLE
-    if (0 != style & WS_OVERLAPPEDWINDOW) {
+    main_window.fullscreen = (0 != style & WS_OVERLAPPEDWINDOW);
+    if (main_window.fullscreen) {
         var inf: MONITORINFO = .{};
-        if (0 != GetWindowPlacement(hwnd, &static.last) and 0 != GetMonitorInfoA(MonitorFromWindow(hwnd, 2), &inf)) {
+        if (0 != GetWindowPlacement(hwnd, &main_window.placement) and 0 != GetMonitorInfoA(MonitorFromWindow(hwnd, 2), &inf)) {
             _ = SetWindowLongA(hwnd, -16, @bitCast(style & ~@as(u32, WS_OVERLAPPEDWINDOW)));
             _ = SetWindowPos(hwnd, null, inf.rcMonitor.left, inf.rcMonitor.top, inf.rcMonitor.right - inf.rcMonitor.left, inf.rcMonitor.bottom - inf.rcMonitor.top, 0x0220);
         }
     } else {
         _ = SetWindowLongA(hwnd, -16, @bitCast(style | @as(u32, WS_OVERLAPPEDWINDOW)));
-        _ = SetWindowPlacement(hwnd, &static.last);
+        _ = SetWindowPlacement(hwnd, &main_window.placement);
         _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, 0x0227);
     }
 }
@@ -563,6 +579,9 @@ extern "user32" fn CreateAcceleratorTableA([*]ACCEL, i32) callconv(WINAPI) ?HACC
 extern "user32" fn TranslateAcceleratorA(?*const anyopaque, HACCEL, *MSG) callconv(WINAPI) i32;
 extern "user32" fn GetSysColor(i32) callconv(WINAPI) u32;
 extern "user32" fn MessageBoxA(?*const anyopaque, ?[*:0]const u8, ?[*:0]const u8, u32) callconv(WINAPI) i32;
+
+extern "user32" fn GetSystemMetricsForDpi(i32, u32) callconv(WINAPI) i32;
+extern "user32" fn GetDpiForWindow(*const anyopaque) callconv(WINAPI) u32;
 
 extern "gdi32" fn GetStockObject(i32) callconv(WINAPI) ?*anyopaque;
 extern "gdi32" fn SetDCBrushColor(win.HDC, u32) callconv(WINAPI) u32;
