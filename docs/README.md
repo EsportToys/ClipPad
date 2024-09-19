@@ -17,9 +17,9 @@ A barebones plaintext scratch pad.
 > - <kbd>F11</kbd> to toggle fullscreen.
 > - <kbd>Ctrl</kbd>+<kbd>Wheel</kbd>/<kbd>+</kbd>/<kbd>-</kbd>/<kbd>0</kbd> to zoom/reset.
 
-> - <kbd>Ctrl</kbd>+<kbd>T</kbd> to change font.
-> - <kbd>Ctrl</kbd><kbd>Shift</kbd>+<kbd>T</kbd> to change text color.
 > - <kbd>Ctrl</kbd>+<kbd>K</kbd> to change background color.
+> - <kbd>Ctrl</kbd>+<kbd>T</kbd> to change foreground color.
+> - <kbd>Ctrl</kbd><kbd>Shift</kbd>+<kbd>T</kbd> to change font.
 
 Only UTF-8 encoding is currently supported.
 
